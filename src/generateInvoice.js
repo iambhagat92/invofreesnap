@@ -1,8 +1,12 @@
 const fs = require('fs');
 const PDFDocument = require('pdfkit');
+const path = require('path');
 
-function formatCurrency(n) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n);
+function getMoneyFormatter(data) {
+  const locale = data.locale || 'en-US';
+  const currency = data.currency || 'USD';
+  const formatter = new Intl.NumberFormat(locale, { style: 'currency', currency });
+  return (n) => formatter.format(n);
 }
 
 function drawTableHeader(doc, x, y, columnWidths) {
@@ -16,13 +20,15 @@ function drawTableHeader(doc, x, y, columnWidths) {
   doc.moveTo(x, y + 14).lineTo(x + columnWidths.reduce((a, b) => a + b, 0), y + 14).stroke();
 }
 
-function drawTableRow(doc, x, y, columnWidths, item) {
+function drawTableRow(doc, x, y, columnWidths, item, formatMoney) {
   doc.font('Helvetica').fontSize(10);
+  const qty = Number(item.quantity || 0);
+  const unit = Number(item.unitPrice || 0);
   const cols = [
     String(item.description || ''),
-    String(item.quantity || 0),
-    formatCurrency(Number(item.unitPrice || 0)),
-    formatCurrency((Number(item.quantity || 0) * Number(item.unitPrice || 0)) || 0),
+    String(qty),
+    formatMoney(unit),
+    formatMoney(qty * unit || 0),
   ];
   let cx = x;
   cols.forEach((val, i) => {
@@ -34,6 +40,16 @@ function drawTableRow(doc, x, y, columnWidths, item) {
 
 function addHeader(doc, data) {
   const vendor = data.vendor || {};
+
+  // Optional logo
+  if (vendor.logo && fs.existsSync(path.resolve(vendor.logo))) {
+    try {
+      doc.image(path.resolve(vendor.logo), 50, 40, { height: 40 });
+    } catch (_) {
+      // ignore invalid logo errors
+    }
+  }
+
   doc.fillColor('#000').font('Helvetica-Bold').fontSize(24).text('INVOICE', { align: 'right' });
   doc.moveDown(0.5);
   doc.fontSize(12).font('Helvetica-Bold').text(vendor.name || 'Vendor', 50, 50);
@@ -59,7 +75,7 @@ function addBillTo(doc, data) {
   if (billTo.phone) doc.text(billTo.phone);
 }
 
-function addItemsTable(doc, data) {
+function addItemsTable(doc, data, formatMoney) {
   const items = Array.isArray(data.items) ? data.items : [];
   const startY = 220;
   const x = 50;
@@ -69,30 +85,65 @@ function addItemsTable(doc, data) {
   let y = startY + 20;
 
   items.forEach((item) => {
-    drawTableRow(doc, x, y, colWidths, item);
+    drawTableRow(doc, x, y, colWidths, item, formatMoney);
     y += 18;
   });
 
   const subtotal = items.reduce((sum, it) => sum + (Number(it.quantity || 0) * Number(it.unitPrice || 0)), 0);
-  const taxRate = Number(data.taxRate || 0);
-  const tax = subtotal * taxRate;
-  const total = subtotal + tax;
 
-  const rightX = x + colWidths[0] + colWidths[1] + colWidths[2];
-  const lineWidth = colWidths[3];
+  // Discounts
+  const discountRate = Number(data.discountRate || 0); // 0..1
+  const discountAmountExplicit = Number(data.discountAmount || 0);
+  const computedDiscount = discountRate > 0 ? subtotal * discountRate : 0;
+  const discount = Math.max(computedDiscount, discountAmountExplicit, 0);
+
+  const taxableBase = Math.max(subtotal - discount, 0);
+
+  // Taxes: support array of { name, rate } or single taxRate
+  let taxes = [];
+  if (Array.isArray(data.taxes) && data.taxes.length) {
+    taxes = data.taxes.map(t => ({
+      name: t.name || 'Tax',
+      rate: Number(t.rate || 0),
+      amount: taxableBase * Number(t.rate || 0)
+    }));
+  } else {
+    const taxRate = Number(data.taxRate || 0);
+    taxes = taxRate ? [{ name: `Tax (${(taxRate * 100).toFixed(1)}%)`, rate: taxRate, amount: taxableBase * taxRate }] : [];
+  }
+
+  const taxTotal = taxes.reduce((s, t) => s + t.amount, 0);
+  const total = taxableBase + taxTotal;
+
+  const labelX = x + colWidths[0] + colWidths[1];
+  const labelWidth = colWidths[2];
+  const valueX = labelX + labelWidth;
+  const valueWidth = colWidths[3];
 
   doc.moveDown(1);
   y += 10;
   doc.font('Helvetica').fontSize(10);
-  doc.text('Subtotal', rightX, y, { width: lineWidth, align: 'right' });
-  doc.text(formatCurrency(subtotal), rightX, y, { width: lineWidth, align: 'right' });
+  doc.text('Subtotal', labelX, y, { width: labelWidth, align: 'right' });
+  doc.text(formatMoney(subtotal), valueX, y, { width: valueWidth, align: 'right' });
   y += 16;
-  doc.text(`Tax (${(taxRate * 100).toFixed(1)}%)`, rightX, y, { width: lineWidth, align: 'right' });
-  doc.text(formatCurrency(tax), rightX, y, { width: lineWidth, align: 'right' });
-  y += 16;
+
+  if (discount > 0) {
+    const discLabel = discountRate ? `Discount (${(discountRate * 100).toFixed(1)}%)` : 'Discount';
+    doc.text(discLabel, labelX, y, { width: labelWidth, align: 'right' });
+    doc.text(`- ${formatMoney(discount)}`, valueX, y, { width: valueWidth, align: 'right' });
+    y += 16;
+  }
+
+  taxes.forEach(t => {
+    const label = t.name || `Tax (${(t.rate * 100).toFixed(1)}%)`;
+    doc.text(label, labelX, y, { width: labelWidth, align: 'right' });
+    doc.text(formatMoney(t.amount), valueX, y, { width: valueWidth, align: 'right' });
+    y += 16;
+  });
+
   doc.font('Helvetica-Bold');
-  doc.text('Total', rightX, y, { width: lineWidth, align: 'right' });
-  doc.text(formatCurrency(total), rightX, y, { width: lineWidth, align: 'right' });
+  doc.text('Total', labelX, y, { width: labelWidth, align: 'right' });
+  doc.text(formatMoney(total), valueX, y, { width: valueWidth, align: 'right' });
 }
 
 function addFooter(doc, data) {
@@ -103,7 +154,7 @@ function addFooter(doc, data) {
 
 function validateData(data) {
   if (!data) throw new Error('Missing invoice data');
-  if (!Array.isArray(data.items)) throw new Error('"items" must be an array');
+  if (!Array.isArray(data.items)) throw new Error('\"items\" must be an array');
 }
 
 function generateInvoice(data, outputPath) {
@@ -117,9 +168,11 @@ function generateInvoice(data, outputPath) {
 
     doc.pipe(stream);
 
+    const formatMoney = getMoneyFormatter(data);
+
     addHeader(doc, data);
     addBillTo(doc, data);
-    addItemsTable(doc, data);
+    addItemsTable(doc, data, formatMoney);
     addFooter(doc, data);
 
     doc.end();

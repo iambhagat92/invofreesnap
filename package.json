@@ -9,7 +9,8 @@
   },
   "scripts": {
     "start": "node bin/invoicegen.js --input sample_invoice.json --output invoice.pdf",
-    "generate": "node bin/invoicegen.js"
+    "generate": "node bin/invoicegen.js",
+    "test": "node bin/invoicegen.js --input sample_invoice.json --output out.pdf && node -e \"require('fs').accessSync('out.pdf'); require('fs').unlinkSync('out.pdf')\""
   },
   "keywords": [
     "invoice",

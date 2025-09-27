@@ -17,6 +17,9 @@
     { "description": "Design services", "quantity": 10, "unitPrice": 50 },
     { "description": "Hosting (monthly)", "quantity": 1, "unitPrice": 25 }
   ],
-  "taxRate": 0.1,
+  "discountRate": 0.05,
+  "taxes": [ { "name": "VAT", "rate": 0.08 }, { "name": "Service Tax", "rate": 0.02 } ],
+  "currency": "USD",
+  "locale": "en-US",
   "notes": "Thanks for your business!"
 }
