@@ -1,0 +1,25 @@
+{
+  "name": "invofreesnap",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Minimal CLI to generate invoice PDFs from JSON",
+  "main": "bin/invoicegen.js",
+  "bin": {
+    "invoicegen": "bin/invoicegen.js"
+  },
+  "scripts": {
+    "start": "node bin/invoicegen.js --input sample_invoice.json --output invoice.pdf",
+    "generate": "node bin/invoicegen.js"
+  },
+  "keywords": [
+    "invoice",
+    "pdf",
+    "cli"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "pdfkit": "^0.14.0",
+    "yargs": "^17.7.2"
+  }
+}
