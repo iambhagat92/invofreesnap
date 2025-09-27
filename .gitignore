@@ -1,0 +1,10 @@
+﻿# general
+.env
+*.log
+# node
+node_modules/
+dist/
+# python
+.venv/
+__pycache__/
+*.pyc
